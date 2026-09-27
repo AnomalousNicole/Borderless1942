@@ -28,6 +28,7 @@ Borderless 1942 removes the border and repositions the window based on the windo
 
 BF1942 throws an extra curveball by changing process when you exit out of a map.
 Borderless 1942 also tracks this and reapplies the border and positioning logic on the new process.
+It follows the newest running `BF1942.exe`, so it keeps working when the old process is slow to exit or when DataField42 downloads maps before the game starts again.
 
 ### Aren't there other tools that would do this? Why did you build this?
 
@@ -36,7 +37,7 @@ Probably. I built this because I wanted to and seemed like a fun side project to
 ### I closed the console window and now I see borders on the window!
 
 Borderless 1942 _is_ the console window. Closing it won't close BF1942 but will stop the border and positioning logic.
-Closing the game through the `Quit` menu item will close the console window after a few moments.
+Closing the game through the `Quit` menu item will close the console window after about 15 seconds.
 
 ### How do I build from source?
 

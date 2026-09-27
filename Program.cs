@@ -18,6 +18,8 @@ for (int i = 0; i < args.Length; i++)
 		{
 			width = parsedWidth;
 		}
+		// Skip the value so it isn't passed on to BF1942
+		i++;
 	}
 	else if (args[i].Equals("-height", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
 	{
@@ -25,6 +27,8 @@ for (int i = 0; i < args.Length; i++)
 		{
 			height = parsedHeight;
 		}
+		// Skip the value so it isn't passed on to BF1942
+		i++;
 	}
 	else if (args[i].Equals("-noedit", StringComparison.OrdinalIgnoreCase))
 	{
@@ -53,7 +57,7 @@ if (!skipConfigEdits)
 				}
 			}
 			File.WriteAllLines(videoConFile, lines);
-			Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] [Updated resolution in {videoConFile} to {width}x{height}]");
+			Log($"[Updated resolution in {videoConFile} to {width}x{height}]");
 		}
 
 		// Update fullscreen setting in VideoDefault.con
@@ -69,7 +73,7 @@ if (!skipConfigEdits)
 				}
 			}
 			File.WriteAllLines(videoDefaultPath, lines);
-			Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] [Updated fullscreen setting in VideoDefault.con]");
+			Log($"[Updated fullscreen setting in VideoDefault.con]");
 		}
 	}
 }
@@ -84,45 +88,94 @@ foreach (var arg in additionalArgs)
 	processStartInfo.ArgumentList.Add(arg);
 
 var process = Process.Start(processStartInfo)!;
-var keepAlive = true;
-Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] [BF1942 Process Has Started] [{process.Id}]");
+Log($"[BF1942 Process Has Started] [{process.Id}]");
 
-// Wait for initial window handle
-var window = await process.WaitForMainWindowAsync();
-window.RemoveBorders();
+// BF1942 restarts itself (eg. when the server changes map or mod) by starting a new BF1942.exe and then exiting.
+// The old process can still be running when the new one opens its window, and DataField42 can run in between
+// while it downloads maps, so always follow the newest running BF1942 process instead of waiting for a single one.
+var exitTimeout = TimeSpan.FromSeconds(15);
+var lastSeenRunning = DateTime.UtcNow;
+var nextProcessScan = DateTime.MinValue;
+Window? window = null;
 
-// Keep itself alive until detected otherwise
-while (keepAlive)
+while (true)
 {
-MainLoop:
-	UpdateWindowPosition(window, width, height);
-	await Task.Delay(100);
-
-	if (process.HasExited)
+	var isRunning = process.IsRunning();
+	if (!isRunning || DateTime.UtcNow >= nextProcessScan)
 	{
-		var oldProcessId = process.Id;
-		var retryCount = 0;
-		while (retryCount < 3)
+		nextProcessScan = DateTime.UtcNow.AddSeconds(1);
+		var newestProcess = FindNewestGameProcess();
+		if (newestProcess is not null && newestProcess.Id != process.Id)
 		{
-			var matchingProcesses = Process.GetProcessesByName("BF1942");
-			if (matchingProcesses.Length == 1)
-			{
-				process = matchingProcesses[0];
-				if (process.HasExited)
-				{
-					break;
-				}
-				Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] [BF1942 Process Has Changed] [{oldProcessId} -> {process.Id}]");
-				window = await process.WaitForMainWindowAsync();
-				window.RemoveBorders();
-				goto MainLoop;
-			}
-			retryCount++;
-			await Task.Delay(TimeSpan.FromSeconds(1));
+			Log($"[BF1942 Process Has Changed] [{process.Id} -> {newestProcess.Id}]");
+			process.Dispose();
+			process = newestProcess;
+			window = null;
+			isRunning = true;
 		}
-		keepAlive = false;
-		Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] [BF1942 Process Has Exited]");
+		else
+		{
+			newestProcess?.Dispose();
+		}
 	}
+
+	if (isRunning)
+	{
+		lastSeenRunning = DateTime.UtcNow;
+
+		// Re-read the main window every time as BF1942 can recreate it, and reapply the window style
+		// as the game can add the borders back when it changes display mode
+		var handle = process.GetMainWindowHandle();
+		if (handle != 0)
+		{
+			if (window?.Handle != handle)
+			{
+				window = new Window(handle);
+				Log($"[BF1942 Window Found] [{process.Id}] [0x{handle:X}]");
+			}
+
+			window.Value.RemoveBorders();
+			UpdateWindowPosition(window.Value, width, height);
+		}
+	}
+	else if (Process.GetProcessesByName("DataField42").Length > 0)
+	{
+		// DataField42 starts BF1942 again once it has finished syncing files
+		lastSeenRunning = DateTime.UtcNow;
+	}
+	else if (DateTime.UtcNow - lastSeenRunning > exitTimeout)
+	{
+		Log("[BF1942 Process Has Exited]");
+		break;
+	}
+
+	await Task.Delay(100);
+}
+
+static Process? FindNewestGameProcess()
+{
+	Process? newestProcess = null;
+	var newestStartTime = DateTime.MinValue;
+	foreach (var candidate in Process.GetProcessesByName("BF1942"))
+	{
+		var startTime = candidate.GetStartTime();
+		if (startTime is not null && startTime > newestStartTime && candidate.IsRunning())
+		{
+			newestProcess?.Dispose();
+			newestProcess = candidate;
+			newestStartTime = startTime.Value;
+		}
+		else
+		{
+			candidate.Dispose();
+		}
+	}
+	return newestProcess;
+}
+
+static void Log(string message)
+{
+	Console.WriteLine($"[Borderless1942]: [{DateTime.Now:yyyy-MM-dd - hh:mm:ss tt}] {message}");
 }
 
 static void UpdateWindowPosition(Window window, int width, int height)

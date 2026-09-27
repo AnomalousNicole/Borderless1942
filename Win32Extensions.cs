@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Windows.Win32;
@@ -21,18 +22,42 @@ public static class Win32Extensions
         return new(handle);
     }
 
-    public static async ValueTask<Window> WaitForMainWindowAsync(this Process process)
+    public static nint GetMainWindowHandle(this Process process)
 	{
-		while (process.MainWindowHandle == IntPtr.Zero)
+		try
 		{
-			await Task.Delay(100);
+			// Process caches the main window handle, refresh it so a recreated window is found
+			process.Refresh();
+			return process.MainWindowHandle;
 		}
-		return process.GetMainWindow();
+		catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+		{
+			return 0;
+		}
 	}
 
-	public unsafe static Window GetMainWindow(this Process process)
+	public static bool IsRunning(this Process process)
 	{
-		return new((nint)process.MainWindowHandle);
+		try
+		{
+			return !process.HasExited;
+		}
+		catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+		{
+			return false;
+		}
+	}
+
+	public static DateTime? GetStartTime(this Process process)
+	{
+		try
+		{
+			return process.StartTime;
+		}
+		catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+		{
+			return null;
+		}
 	}
 }
 
@@ -63,13 +88,19 @@ public readonly record struct Window(nint Handle)
 
 	public void RemoveBorders()
 	{
-		var style = PInvoke.GetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
-		style &= ~(int)(WINDOW_STYLE.WS_THICKFRAME | WINDOW_STYLE.WS_DLGFRAME | WINDOW_STYLE.WS_BORDER);
-		_ = PInvoke.SetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE, style);
+		const int BorderStyles = (int)(WINDOW_STYLE.WS_THICKFRAME | WINDOW_STYLE.WS_DLGFRAME | WINDOW_STYLE.WS_BORDER);
+		const int BorderExStyles = (int)(WINDOW_EX_STYLE.WS_EX_DLGMODALFRAME | WINDOW_EX_STYLE.WS_EX_WINDOWEDGE | WINDOW_EX_STYLE.WS_EX_CLIENTEDGE | WINDOW_EX_STYLE.WS_EX_STATICEDGE);
 
-		style = PInvoke.GetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
-		style &= ~(int)(WINDOW_EX_STYLE.WS_EX_DLGMODALFRAME | WINDOW_EX_STYLE.WS_EX_WINDOWEDGE | WINDOW_EX_STYLE.WS_EX_CLIENTEDGE | WINDOW_EX_STYLE.WS_EX_STATICEDGE);
-		_ = PInvoke.SetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, style);
+		// Only touch the window when it has borders, as this is called on every update
+		var style = PInvoke.GetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
+		var exStyle = PInvoke.GetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
+		if ((style & BorderStyles) == 0 && (exStyle & BorderExStyles) == 0)
+		{
+			return;
+		}
+
+		_ = PInvoke.SetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE, style & ~BorderStyles);
+		_ = PInvoke.SetWindowLong(Win32Handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, exStyle & ~BorderExStyles);
 		PInvoke.SendMessage(Win32Handle, PInvoke.WM_EXITSIZEMOVE, default, default);
 	}
 }
