@@ -1,5 +1,6 @@
 ﻿using Borderless1942;
 using System.Diagnostics;
+using System.Text;
 
 var monitorBounds = Win32Extensions.GetPrimaryMonitor().GetBounds();
 var defaultWidth = monitorBounds.Width;
@@ -7,6 +8,8 @@ var defaultHeight = monitorBounds.Height;
 var width = defaultWidth;
 var height = defaultHeight;
 var skipConfigEdits = false;
+// BF1942 uses ANSI .con files, Latin1 maps every byte 1:1 so any non-ASCII characters are written back unchanged
+var conEncoding = Encoding.Latin1;
 
 List<string> additionalArgs = new();
 
@@ -48,7 +51,7 @@ if (!skipConfigEdits)
 		var videoConFiles = Directory.GetFiles(Path.Combine(modsPath, "Profiles"), "Video.con", SearchOption.AllDirectories);
 		foreach (var videoConFile in videoConFiles)
 		{
-			var lines = File.ReadAllLines(videoConFile);
+			var lines = File.ReadAllLines(videoConFile, conEncoding);
 			for (int i = 0; i < lines.Length; i++)
 			{
 				if (lines[i].StartsWith("game.setGameDisplayMode"))
@@ -59,7 +62,7 @@ if (!skipConfigEdits)
 					lines[i] = $"game.setGameDisplayMode {width} {height} 32 {refreshRate}";
 				}
 			}
-			File.WriteAllLines(videoConFile, lines);
+			File.WriteAllLines(videoConFile, lines, conEncoding);
 			Log($"[Updated resolution in {videoConFile} to {width}x{height}]");
 		}
 
@@ -67,7 +70,7 @@ if (!skipConfigEdits)
 		var videoDefaultPath = Path.Combine(modsPath, "VideoDefault.con");
 		if (File.Exists(videoDefaultPath))
 		{
-			var lines = File.ReadAllLines(videoDefaultPath);
+			var lines = File.ReadAllLines(videoDefaultPath, conEncoding);
 			for (int i = 0; i < lines.Length; i++)
 			{
 				if (lines[i].StartsWith("renderer.setFullScreen"))
@@ -75,7 +78,7 @@ if (!skipConfigEdits)
 					lines[i] = "renderer.setFullScreen 0";
 				}
 			}
-			File.WriteAllLines(videoDefaultPath, lines);
+			File.WriteAllLines(videoDefaultPath, lines, conEncoding);
 			Log($"[Updated fullscreen setting in VideoDefault.con]");
 		}
 	}
