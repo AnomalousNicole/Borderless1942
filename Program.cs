@@ -53,7 +53,10 @@ if (!skipConfigEdits)
 			{
 				if (lines[i].StartsWith("game.setGameDisplayMode"))
 				{
-					lines[i] = $"game.setGameDisplayMode {width} {height} 32 60";
+					// Keep the user's chosen refresh rate, only the resolution needs to match the monitor
+					var parts = lines[i].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+					var refreshRate = parts.Length > 4 && int.TryParse(parts[4], out var parsedRefreshRate) ? parsedRefreshRate : 60;
+					lines[i] = $"game.setGameDisplayMode {width} {height} 32 {refreshRate}";
 				}
 			}
 			File.WriteAllLines(videoConFile, lines);
